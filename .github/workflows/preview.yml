@@ -1,0 +1,50 @@
+# Plan morning-digest § 3/§ 4 (issues #7, #8). Publishes one page as a static preview on GitHub Pages
+# (ADR 0003). The preview is a Pages artifact, never a commit, so it stays out of the repo and
+# its history. The lane marker comes from the repo secret LANE_MARKER; delete the secret and run
+# again to upload the same page over the same link with "no marker set".
+name: preview
+on:
+  workflow_dispatch:
+    inputs:
+      night:
+        description: night to preview (YYYY-MM-DD)
+        default: '2026-10-28'
+        required: true
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: false
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: pnpm install --no-frozen-lockfile
+      - name: Save the page as one HTML file
+        env:
+          LANE_MARKER: ${{ secrets.LANE_MARKER }}
+          NIGHT: ${{ inputs.night }}
+          PORT: 8787
+        run: |
+          pnpm start > rig.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf localhost:8787/health >/dev/null && break; sleep 1; done
+          mkdir -p _site
+          curl -sf "localhost:8787/digest/$NIGHT" -o _site/index.html
+          grep -o '<span class="marker">[^<]*</span>' _site/index.html | sed 's/>[^<]*</>…</' 
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deploy
+        uses: actions/deploy-pages@v4
